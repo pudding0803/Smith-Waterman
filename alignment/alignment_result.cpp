@@ -1,6 +1,6 @@
 #include <string>
 #include <iomanip>
-#include "AlignmentResult.hpp"
+#include "alignment_result.hpp"
 
 std::ostream& operator<<(std::ostream& os, const AlignmentResult& result) {
     std::size_t padding = std::to_string(std::max(result.range1.first, result.range2.first) + 1).size();

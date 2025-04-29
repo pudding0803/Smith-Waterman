@@ -21,16 +21,18 @@ cmake --build .
 > Example inputs are located in the `/data` directory.
 
 - From [NCBI GenBank](https://www.ncbi.nlm.nih.gov/genbank/)
-  - `ACTB.fa`
-  - `BCL2.fa`
-  - `GAPDH.fa`
-  - `TP53.fa`
+  - `actb.fa`
+  - `bcl2.fa`
+  - `brca1.fa`
+  - `cyp2e1.fa`
+  - `gapdh.fa`
+  - `tp53.fa`
 
 ## Supported Modes
 
 - `SmithWaterman::Mode`
   - `Naive`
-  - `SIMD`
+  - `XSIMD`
 
 ## Usage
 
@@ -43,4 +45,3 @@ auto report = SmithWaterman::run(fasta1, fasta2, mode);
   - `alignmentResult`
   - `durationMs`
   - `maxScore`
-

@@ -1,15 +1,16 @@
 #pragma once
 
-#include <exception>
-#include "AlignmentResult.hpp"
-#include "Fasta.hpp"
+#include <vector>
+#include "alignment_result.hpp"
+#include "fasta.hpp"
+#include "direction.hpp"
 
 class SmithWaterman {
 public:
-    using value_type = int;
+    using value_type = int16_t;
 
     enum class Mode {
-        Naive, SIMD
+        Naive, XSIMD
     };
 
     struct AlignmentReport {
@@ -21,6 +22,8 @@ public:
     [[nodiscard]] static AlignmentReport run(const Fasta&, const Fasta&, Mode);
 
 private:
+    static AlignmentResult traceback(const std::vector<std::vector<Direction>>&, const Fasta&, const Fasta&, std::pair<std::size_t, std::size_t>&);
+
     static AlignmentReport naive(const Fasta&, const Fasta&);
-    static AlignmentReport simd(const Fasta&, const Fasta&);
+    static AlignmentReport xsimd(const Fasta&, const Fasta&);
 };

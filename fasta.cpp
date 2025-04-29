@@ -1,5 +1,5 @@
 #include <iostream>
-#include "Fasta.hpp"
+#include "fasta.hpp"
 
 std::istream& operator>>(std::istream& is, Fasta& fasta) {
     std::string line;

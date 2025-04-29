@@ -1,63 +1,29 @@
 #include <vector>
 #include <chrono>
 #include <xsimd/xsimd.hpp>
-#include "SmithWaterman.hpp"
-#include "utils.hpp"
-#include "Direction.hpp"
-#include "Constants.hpp"
+#include "smith_waterman.hpp"
+#include "direction.hpp"
+#include "constants.hpp"
 
-SmithWaterman::AlignmentReport SmithWaterman::run(const Fasta& fasta1, const Fasta& fasta2, Mode mode) {
-    switch (mode) {
-        case Mode::Naive:
-            return naive(fasta1, fasta2);
-        case Mode::SIMD:
-            return simd(fasta1, fasta2);
+namespace {
+
+constexpr uint8_t baseToIndex(const char base) {
+    switch (base) {
+        case 'A':
+            return 0;
+        case 'C':
+            return 1;
+        case 'G':
+            return 2;
+        case 'T':
+            return 3;
     }
-    throw std::invalid_argument("Invalid SmithWaterman::Mode");
+    throw std::invalid_argument("Invalid nucleotide character");
 }
 
-SmithWaterman::AlignmentReport SmithWaterman::naive(const Fasta& fasta1, const Fasta& fasta2) {
-    using value_type = int16_t;
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    std::vector<std::vector<value_type>> dp(fasta1.size + 1, std::vector<value_type>(fasta2.size + 1));
-    std::vector<std::vector<value_type>> vGap(fasta1.size + 1, std::vector<value_type>(fasta2.size + 1));
-    std::vector<std::vector<value_type>> hGap(fasta1.size + 1, std::vector<value_type>(fasta2.size + 1));
-    std::vector<std::vector<Direction>> trace(fasta1.size + 1, std::vector<Direction>(fasta2.size + 1));
-
-    value_type maxScore = 0;
-    std::pair<std::size_t, std::size_t> maxPos = {0, 0};
-    for (std::size_t i = 1; i <= fasta1.size; ++i) {
-        for (std::size_t j = 1; j <= fasta2.size; ++j) {
-            vGap[i][j] = std::max(dp[i - 1][j] + GAP_OPEN, vGap[i - 1][j] + GAP_EXTEND);
-            hGap[i][j] = std::max(dp[i][j - 1] + GAP_OPEN, hGap[i][j - 1] + GAP_EXTEND);
-    
-            value_type diag = dp[i - 1][j - 1] + (fasta1.sequence[i - 1] == fasta2.sequence[j - 1] ? MATCH : MISMATCH);
-            dp[i][j] = std::max({static_cast<value_type>(0), diag, hGap[i][j], vGap[i][j]});
-    
-            if (dp[i][j] == diag) [[likely]] {
-                trace[i][j] = Direction::DIAG;
-            } else if (dp[i][j] == vGap[i][j]) {
-                trace[i][j] = Direction::UP;
-            } else if (dp[i][j] == hGap[i][j]) {
-                trace[i][j] = Direction::LEFT;
-            }  else [[unlikely]] {
-                trace[i][j] = Direction::NONE;
-            }
-    
-            if (dp[i][j] > maxScore) {
-                maxScore = dp[i][j];
-                maxPos = {i, j};
-            }
-        }
-    }
-    
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto result = traceback(trace, fasta1, fasta2, maxPos);
-    return {result, std::chrono::duration<double, std::milli>(end_time - start_time).count(), maxScore};
 }
 
-SmithWaterman::AlignmentReport SmithWaterman::simd(const Fasta& fasta1, const Fasta& fasta2) {
+SmithWaterman::AlignmentReport SmithWaterman::xsimd(const Fasta& fasta1, const Fasta& fasta2) {
     using batch_t = xsimd::batch<value_type>;
 
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -87,19 +53,18 @@ SmithWaterman::AlignmentReport SmithWaterman::simd(const Fasta& fasta1, const Fa
     const batch_t zero = batch_t::broadcast(0);
     const batch_t vGapOpen = batch_t::broadcast(GAP_OPEN);
     const batch_t vGapExtend = batch_t::broadcast(GAP_EXTEND);
-    const batch_t vDirectionNone = batch_t::broadcast(Direction::NONE);
-    const batch_t vDirectionDiag = batch_t::broadcast(Direction::DIAG);
-    const batch_t vDirectionUp = batch_t::broadcast(Direction::UP);
-    const batch_t vDirectionLeft = batch_t::broadcast(Direction::LEFT);
+    const batch_t vDirectionNone = batch_t::broadcast(Direction::None);
+    const batch_t vDirectionDiag = batch_t::broadcast(Direction::Diag);
+    const batch_t vDirectionUp = batch_t::broadcast(Direction::Up);
+    const batch_t vDirectionLeft = batch_t::broadcast(Direction::Left);
 
     std::vector<batch_t> vPrevH(segLen, zero);
     std::vector<batch_t> vCurrH(segLen, zero);
     std::vector<batch_t> vE(segLen, zero);
-    batch_t vMax = zero;
 
     value_type maxScore = 0;
     std::pair<std::size_t, std::size_t> maxPos = {0, 0};
-    std::vector<std::vector<Direction>> trace(fasta1.size + 1, std::vector<Direction>(fasta2.size + 1, Direction::NONE));
+    std::vector<std::vector<Direction>> trace(fasta1.size + 1, std::vector<Direction>(fasta2.size + 1, Direction::None));
 
     for (std::size_t j = 0; j < fasta2.size; ++j) {
         const auto& currProfile = profile[baseToIndex(fasta2.sequence[j])];
