@@ -33,6 +33,7 @@ cmake --build .
 - `SmithWaterman::Mode`
   - `Naive`
   - `XSIMD`
+  - `CUDA`
 
 ## Usage
 

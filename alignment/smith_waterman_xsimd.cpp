@@ -7,26 +7,14 @@
 
 namespace {
 
-constexpr uint8_t baseToIndex(const char base) {
-    switch (base) {
-        case 'A':
-            return 0;
-        case 'C':
-            return 1;
-        case 'G':
-            return 2;
-        case 'T':
-            return 3;
-    }
-    throw std::invalid_argument("Invalid nucleotide character");
-}
+using value_type = int16_t;
 
 }
 
 SmithWaterman::AlignmentReport SmithWaterman::xsimd(const Fasta& fasta1, const Fasta& fasta2) {
     using batch_t = xsimd::batch<value_type>;
 
-    auto start_time = std::chrono::high_resolution_clock::now();
+    auto startTime = std::chrono::high_resolution_clock::now();
 
     std::size_t segLen = (fasta1.size + batch_t::size - 1) / batch_t::size;
     std::array<std::vector<batch_t>, 4> profile;
@@ -55,8 +43,8 @@ SmithWaterman::AlignmentReport SmithWaterman::xsimd(const Fasta& fasta1, const F
     const batch_t vGapExtend = batch_t::broadcast(GAP_EXTEND);
     const batch_t vDirectionNone = batch_t::broadcast(Direction::None);
     const batch_t vDirectionDiag = batch_t::broadcast(Direction::Diag);
-    const batch_t vDirectionUp = batch_t::broadcast(Direction::Up);
     const batch_t vDirectionLeft = batch_t::broadcast(Direction::Left);
+    const batch_t vDirectionUp = batch_t::broadcast(Direction::Up);
 
     std::vector<batch_t> vPrevH(segLen, zero);
     std::vector<batch_t> vCurrH(segLen, zero);
@@ -64,7 +52,7 @@ SmithWaterman::AlignmentReport SmithWaterman::xsimd(const Fasta& fasta1, const F
 
     value_type maxScore = 0;
     std::pair<std::size_t, std::size_t> maxPos = {0, 0};
-    std::vector<std::vector<Direction>> trace(fasta1.size + 1, std::vector<Direction>(fasta2.size + 1, Direction::None));
+    std::vector<std::vector<Direction>> trace(fasta1.size, std::vector<Direction>(fasta2.size, Direction::None));
 
     for (std::size_t j = 0; j < fasta2.size; ++j) {
         const auto& currProfile = profile[baseToIndex(fasta2.sequence[j])];
@@ -86,16 +74,15 @@ SmithWaterman::AlignmentReport SmithWaterman::xsimd(const Fasta& fasta1, const F
         while (!done) {
             done = true;
             for (std::size_t seg = 0; seg < segLen; ++seg) {
-                batch_t vCandidateF = seg > 0
+                vF[seg] = seg > 0
                     ? xsimd::max(vCurrH[seg - 1] + vGapOpen, vF[seg - 1] + vGapExtend)
                     : xsimd::max(xsimd::slide_left<sizeof(value_type)>(vCurrH.back()) + vGapOpen, xsimd::slide_left<sizeof(value_type)>(vF.back()) + vGapExtend);
-                auto mask = vCandidateF > vCurrH[seg];
+                auto mask = vF[seg] > vCurrH[seg];
                 if (xsimd::any(mask)) {
                     done = false;
                 }
-                vF[seg] = vCandidateF;
+                vTrace[seg] = xsimd::select(mask || vF[seg] == zero && vTrace[seg] == vDirectionNone, vDirectionUp, vTrace[seg]);
                 vCurrH[seg] = xsimd::max(vCurrH[seg], vF[seg]);
-                vTrace[seg] = xsimd::select(mask || vCandidateF == zero && vTrace[seg] == vDirectionNone, vDirectionUp, vTrace[seg]);
             }
         }
 
@@ -108,7 +95,7 @@ SmithWaterman::AlignmentReport SmithWaterman::xsimd(const Fasta& fasta1, const F
                         maxScore = score;
                         maxPos = {i + 1, j + 1};
                     }
-                    trace[i + 1][j + 1] = static_cast<Direction>(vTrace[seg].get(lane));
+                    trace[i][j] = static_cast<Direction>(vTrace[seg].get(lane));
                 }
             }
         }
@@ -116,7 +103,9 @@ SmithWaterman::AlignmentReport SmithWaterman::xsimd(const Fasta& fasta1, const F
         std::swap(vPrevH, vCurrH);
     }
 
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto result = traceback(trace, fasta1, fasta2, maxPos);
-    return {result, std::chrono::duration<double, std::milli>(end_time - start_time).count(), maxScore};
+    auto endTime = std::chrono::high_resolution_clock::now();
+    auto result = traceback(fasta1, fasta2, maxPos, [&](std::size_t i, std::size_t j) {
+        return trace[i - 1][j - 1];
+    });
+    return {result, std::chrono::duration<double, std::milli>(endTime - startTime).count(), maxScore};
 }

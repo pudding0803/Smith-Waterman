@@ -6,41 +6,50 @@
 #include "constants.hpp"
 
 SmithWaterman::AlignmentReport SmithWaterman::naive(const Fasta& fasta1, const Fasta& fasta2) {
-    auto start_time = std::chrono::high_resolution_clock::now();
+    auto startTime = std::chrono::high_resolution_clock::now();
 
-    std::vector<std::vector<value_type>> dp(fasta1.size + 1, std::vector<value_type>(fasta2.size + 1));
-    std::vector<std::vector<value_type>> vGap(fasta1.size + 1, std::vector<value_type>(fasta2.size + 1));
-    std::vector<std::vector<value_type>> hGap(fasta1.size + 1, std::vector<value_type>(fasta2.size + 1));
-    std::vector<std::vector<Direction>> trace(fasta1.size + 1, std::vector<Direction>(fasta2.size + 1));
+    std::vector<int> vPrevH(fasta1.size + 1);
+    std::vector<int> vCurrH(fasta1.size + 1);
+    std::vector<int> vE(fasta1.size + 1);
+    std::vector<std::vector<Direction>> trace(fasta2.size + 1, std::vector<Direction>(fasta1.size + 1, Direction::None));
 
-    value_type maxScore = 0;
+    int maxScore = 0;
     std::pair<std::size_t, std::size_t> maxPos = {0, 0};
-    for (std::size_t i = 1; i <= fasta1.size; ++i) {
-        for (std::size_t j = 1; j <= fasta2.size; ++j) {
-            vGap[i][j] = std::max(dp[i - 1][j] + GAP_OPEN, vGap[i - 1][j] + GAP_EXTEND);
-            hGap[i][j] = std::max(dp[i][j - 1] + GAP_OPEN, hGap[i][j - 1] + GAP_EXTEND);
+
+    std::vector<int> dp(fasta1.size * fasta2.size);
+
+    for (std::size_t j = 1; j <= fasta2.size; ++j) {
+        int F = 0;
+
+        for (std::size_t i = 1; i <= fasta1.size; ++i) {
+            vE[i] = std::max(vPrevH[i] + GAP_OPEN, vE[i] + GAP_EXTEND);
+            F = std::max(vCurrH[i - 1] + GAP_OPEN, F + GAP_EXTEND);
     
-            value_type diag = dp[i - 1][j - 1] + (fasta1.sequence[i - 1] == fasta2.sequence[j - 1] ? MATCH : MISMATCH);
-            dp[i][j] = std::max({static_cast<value_type>(0), diag, vGap[i][j], hGap[i][j]});
-    
-            if (dp[i][j] == diag) [[likely]] {
-                trace[i][j] = Direction::Diag;
-            } else if (dp[i][j] == vGap[i][j]) {
-                trace[i][j] = Direction::Up;
-            } else if (dp[i][j] == hGap[i][j]) {
-                trace[i][j] = Direction::Left;
-            }  else [[unlikely]] {
-                trace[i][j] = Direction::None;
+            int diag = vPrevH[i - 1] + (fasta1.sequence[i - 1] == fasta2.sequence[j - 1] ? MATCH : MISMATCH);
+            vCurrH[i] = std::max({static_cast<int>(0), diag, vE[i], F});
+            dp[(i - 1) * fasta2.size + (j - 1)] = vCurrH[i];
+
+            if (vCurrH[i] == diag) [[likely]] {
+                trace[j][i] = Direction::Diag;
+            } else if (vCurrH[i] == vE[i]) {
+                trace[j][i] = Direction::Left;
+            } else if (vCurrH[i] == F) {
+                trace[j][i] = Direction::Up;
+            } else [[unlikely]] {
+                trace[j][i] = Direction::None;
             }
     
-            if (dp[i][j] > maxScore) {
-                maxScore = dp[i][j];
+            if (vCurrH[i] > maxScore) {
+                maxScore = vCurrH[i];
                 maxPos = {i, j};
             }
         }
+        std::swap(vPrevH, vCurrH);
     }
-    
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto result = traceback(trace, fasta1, fasta2, maxPos);
-    return {result, std::chrono::duration<double, std::milli>(end_time - start_time).count(), maxScore};
+
+    auto endTime = std::chrono::high_resolution_clock::now();
+    auto result = traceback(fasta1, fasta2, maxPos, [&](std::size_t i, std::size_t j) {
+        return trace[j][i];
+    });
+    return {result, std::chrono::duration<double, std::milli>(endTime - startTime).count(), maxScore};
 }

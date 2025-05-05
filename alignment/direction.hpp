@@ -3,5 +3,5 @@
 #include <cstdint>
 
 enum class Direction : uint8_t {
-    None, Diag, Up, Left
+    None, Diag, Left, Up
 };
